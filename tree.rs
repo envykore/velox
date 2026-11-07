@@ -8,15 +8,20 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-#[derive(Debug, Clone)]
+// u32 is plenty, no roblox project has 4 billion scripts
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileId(pub u32);
+
+#[derive(Debug)]
 pub struct SourceFile {
+    pub id: FileId,
     pub path: PathBuf,
     pub kind: FileKind,
     // only Some for scripts, not models/etc 
     pub source: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FileKind {
     Script,       // .server.lua/luau
     LocalScript,  // .client.lua/luau
@@ -49,11 +54,16 @@ impl FileKind {
 }
 
 pub struct SourceTree {
+    // flat vec, FileId(i) == files[i]
     pub files: Vec<SourceFile>,
     pub root: PathBuf,
 }
 
 impl SourceTree {
+    pub fn get(&self, id: FileId) -> &SourceFile {
+        &self.files[id.0 as usize]
+    }
+
     pub fn scripts(&self) -> impl Iterator<Item = &SourceFile> {
         self.files.iter().filter(|f| f.kind.is_script())
     }
@@ -64,24 +74,43 @@ impl SourceTree {
             .map(|s| s.len())
             .sum()
     }
+
+    // path ---> id lookup, this is used during graph build to resolve requires
+    pub fn find_by_path(&self, path: &Path) -> Option<FileId> {
+        self.files.iter().find(|f| f.path == path).map(|f| f.id)
+    }
 }
 
 pub fn build(project: &RojoProject, project_path: &Path) -> Result<SourceTree> {
     let root = project::root_dir(project_path);
-    let mut files: Vec<SourceFile> = Vec::new();
+    let mut paths: Vec<(PathBuf, FileKind)> = Vec::new();
 
-    collect_node(&project.tree, &root, &mut files);
+    collect_node(&project.tree, &root, &mut paths);
+
+    let files = paths
+        .into_iter()
+        .enumerate()
+        .map(|(i, (path, kind))| {
+            let source = if kind.is_script() {
+                std::fs::read_to_string(&path).ok()
+            } else {
+                None
+            };
+            SourceFile { id: FileId(i as u32), path, kind, source }
+        })
+        .collect();
 
     Ok(SourceTree { files, root })
 }
 
-fn collect_node(node: &RojoNode, base: &Path, out: &mut Vec<SourceFile>) {
+fn collect_node(node: &RojoNode, base: &Path, out: &mut Vec<(PathBuf, FileKind)>) {
     if let Some(rel_path) = &node.path {
         let full = base.join(rel_path);
         if full.is_dir() {
             collect_dir(&full, out);
         } else if full.is_file() {
-            out.push(load_file(&full));
+            let kind = FileKind::from_path(&full);
+            out.push((full, kind));
         }
         // if neither the path plobabry doesnt exist
     }
@@ -91,21 +120,11 @@ fn collect_node(node: &RojoNode, base: &Path, out: &mut Vec<SourceFile>) {
     }
 }
 
-fn collect_dir(dir: &Path, out: &mut Vec<SourceFile>) {
+fn collect_dir(dir: &Path, out: &mut Vec<(PathBuf, FileKind)>) {
     for entry in WalkDir::new(dir).into_iter().flatten() {
         if entry.file_type().is_file() {
-            out.push(load_file(entry.path()));
+            let kind = FileKind::from_path(entry.path());
+            out.push((entry.path().to_path_buf(), kind));
         }
     }
-}
-
-fn load_file(path: &Path) -> SourceFile {
-    let kind = FileKind::from_path(path);
-    let source = if kind.is_script() {
-        std::fs::read_to_string(path).ok()
-    } else {
-        None
-    };
-
-    SourceFile { path: path.to_path_buf(), kind, source }
 }

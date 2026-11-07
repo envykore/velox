@@ -39,19 +39,12 @@ pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph) {
     }
 
     // filter out server/local scripts
-    let mut dead = graph.unreferenced_modules();
-    dead.retain(|n| {
-        let name = n.path.to_string_lossy();
-        !name.ends_with(".server.lua")
-            && !name.ends_with(".server.luau")
-            && !name.ends_with(".client.lua")
-            && !name.ends_with(".client.luau")
-    });
-
+    let dead = graph.unreferenced_modules(tree);
     if !dead.is_empty() {
         println!("{}", "dead modules (never required)".underline().yellow());
-        for n in &dead {
-            println!("  {:?}", n.path.file_name().unwrap_or_default());
+        for id in &dead {
+            let file = tree.get(*id);
+            println!("  {:?}", file.path.file_name().unwrap_or_default());
         }
         println!();
     }
@@ -62,7 +55,14 @@ pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph) {
         for cycle in &cycles {
             let names: Vec<_> = cycle
                 .iter()
-                .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+                .map(|&id| {
+                    tree.get(id)
+                        .path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                })
                 .collect();
             println!("  {} -> {}", names.join(" -> "), names[0]);
         }

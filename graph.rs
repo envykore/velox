@@ -3,37 +3,46 @@
 //! that luau require() calls can be dynamic (require(script.Parent.Whatever))
 //! which we cant statically resolve (skip)
 
-use crate::tree::SourceTree;
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use crate::tree::{FileId, FileKind, SourceTree};
+use std::collections::HashSet;
 
 pub struct GraphNode {
-    pub path: PathBuf,
-    pub requires: Vec<String>,
-    pub is_required_by: Vec<PathBuf>,
+    pub id: FileId,
+    // resolved ids of modules this file requires
+    pub requires: Vec<FileId>,
+    pub required_by: Vec<FileId>,
 }
 
 pub struct RequireGraph {
-    pub nodes: HashMap<PathBuf, GraphNode>,
+    // indexed by FileId, same order as SourceTree
+    pub nodes: Vec<GraphNode>,
 }
 
 impl RequireGraph {
+    pub fn get(&self, id: FileId) -> &GraphNode {
+        &self.nodes[id.0 as usize]
+    }
+
     // modules that nothing requires - either entry points or dead code
     // caller has to filter out server/local scripts since those are always "unreferenced"
-    pub fn unreferenced_modules(&self) -> Vec<&GraphNode> {
+    pub fn unreferenced_modules<'a>(&'a self, tree: &'a SourceTree) -> Vec<FileId> {
         self.nodes
-            .values()
-            .filter(|n| n.is_required_by.is_empty())
+            .iter()
+            .filter(|n| {
+                n.required_by.is_empty()
+                    && tree.get(n.id).kind == FileKind::ModuleScript
+            })
+            .map(|n| n.id)
             .collect()
     }
 
-    pub fn find_cycles(&self) -> Vec<Vec<PathBuf>> {
+    pub fn find_cycles(&self) -> Vec<Vec<FileId>> {
         let mut cycles = Vec::new();
         let mut visited = HashSet::new();
         let mut stack = Vec::new();
 
-        for start in self.nodes.keys() {
-            self.dfs(start, &mut visited, &mut stack, &mut cycles);
+        for node in &self.nodes {
+            self.dfs(node.id, &mut visited, &mut stack, &mut cycles);
         }
 
         cycles
@@ -41,28 +50,24 @@ impl RequireGraph {
 
     fn dfs(
         &self,
-        node: &PathBuf,
-        visited: &mut HashSet<PathBuf>,
-        stack: &mut Vec<PathBuf>,
-        cycles: &mut Vec<Vec<PathBuf>>,
+        id: FileId,
+        visited: &mut HashSet<FileId>,
+        stack: &mut Vec<FileId>,
+        cycles: &mut Vec<Vec<FileId>>,
     ) {
-        if let Some(pos) = stack.iter().position(|p| p == node) {
+        if let Some(pos) = stack.iter().position(|&s| s == id) {
             cycles.push(stack[pos..].to_vec());
             return;
         }
-        if visited.contains(node) {
+        if visited.contains(&id) {
             return;
         }
 
-        visited.insert(node.clone());
-        stack.push(node.clone());
+        visited.insert(id);
+        stack.push(id);
 
-        if let Some(n) = self.nodes.get(node) {
-            for req in &n.requires {
-                if let Some(resolved) = resolve_require(req, node) {
-                    self.dfs(&resolved, visited, stack, cycles);
-                }
-            }
+        for &dep in &self.get(id).requires {
+            self.dfs(dep, visited, stack, cycles);
         }
 
         stack.pop();
@@ -70,36 +75,31 @@ impl RequireGraph {
 }
 
 pub fn build(tree: &SourceTree) -> anyhow::Result<RequireGraph> {
-    let mut nodes: HashMap<PathBuf, GraphNode> = HashMap::new();
+    let mut nodes: Vec<GraphNode> = tree
+        .files
+        .iter()
+        .map(|f| GraphNode { id: f.id, requires: Vec::new(), required_by: Vec::new() })
+        .collect();
 
-    for file in tree.scripts() {
-        let requires = file
-            .source
-            .as_deref()
-            .map(extract_requires)
-            .unwrap_or_default();
-
-        nodes.insert(
-            file.path.clone(),
-            GraphNode {
-                path: file.path.clone(),
-                requires,
-                is_required_by: Vec::new(),
-            },
-        );
-    }
+    // collect edges first so we're not borrowing nodes while mutating it
+    let edges: Vec<(FileId, Vec<FileId>)> = tree
+        .scripts()
+        .map(|file| {
+            let requires = file
+                .source
+                .as_deref()
+                .map(|src| resolve_requires(src, file.id, tree))
+                .unwrap_or_default();
+            (file.id, requires)
+        })
+        .collect();
 
     // second pass to wire up back-refs
-    let paths: Vec<PathBuf> = nodes.keys().cloned().collect();
-    for src in &paths {
-        let reqs: Vec<String> = nodes[src].requires.clone();
-        for req in reqs {
-            if let Some(target) = resolve_require(&req, src) {
-                if let Some(target_node) = nodes.get_mut(&target) {
-                    target_node.is_required_by.push(src.clone());
-                }
-            }
+    for (src_id, deps) in edges {
+        for &dep_id in &deps {
+            nodes[dep_id.0 as usize].required_by.push(src_id);
         }
+        nodes[src_id.0 as usize].requires = deps;
     }
 
     Ok(RequireGraph { nodes })
@@ -107,7 +107,7 @@ pub fn build(tree: &SourceTree) -> anyhow::Result<RequireGraph> {
 
 // not a real parser just scans for require("...") patterns with string literals
 // dynamic requires like require(script.Parent.X) 
-fn extract_requires(source: &str) -> Vec<String> {
+fn resolve_requires(source: &str, from: FileId, tree: &SourceTree) -> Vec<FileId> {
     let mut results = Vec::new();
 
     for line in source.lines() {
@@ -119,8 +119,10 @@ fn extract_requires(source: &str) -> Vec<String> {
         let mut rest = trimmed;
         while let Some(pos) = rest.find("require(") {
             let after = &rest[pos + 8..];
-            if let Some(arg) = extract_string_arg(after) {
-                results.push(arg);
+            if let Some(raw) = extract_string_arg(after) {
+                if let Some(id) = resolve_path(raw, from, tree) {
+                    results.push(id);
+                }
             }
             rest = &rest[pos + 8..];
         }
@@ -129,7 +131,7 @@ fn extract_requires(source: &str) -> Vec<String> {
     results
 }
 
-fn extract_string_arg(s: &str) -> Option<String> {
+fn extract_string_arg(s: &str) -> Option<&str> {
     let s = s.trim_start();
     let (quote, rest) = if s.starts_with('"') {
         ('"', &s[1..])
@@ -141,17 +143,15 @@ fn extract_string_arg(s: &str) -> Option<String> {
     };
 
     let end = rest.find(quote)?;
-    Some(rest[..end].to_string())
+    Some(&rest[..end])
 }
 
-fn resolve_require(req: &str, from: &PathBuf) -> Option<PathBuf> {
-    let parent = from.parent()?;
+fn resolve_path(req: &str, from: FileId, tree: &SourceTree) -> Option<FileId> {
+    let parent = tree.get(from).path.parent()?;
 
     let luau = parent.join(req).with_extension("luau");
-    if luau.exists() { return Some(luau); }
+    if let Some(id) = tree.find_by_path(&luau) { return Some(id); }
 
     let lua = parent.join(req).with_extension("lua");
-    if lua.exists() { return Some(lua); }
-
-    None
+    tree.find_by_path(&lua)
 }
