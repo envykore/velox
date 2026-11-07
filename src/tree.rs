@@ -1,8 +1,9 @@
 //! tree.rs
 //! walks the filesystem based on what the rojo project tells us and builds
-//! a flat list of every source file we care about also reads script contents
-//! into memory since we'll need them for the graph later anyway
+//! a flat list of every source file we care about. files get a numeric id
+//! here which everything else uses instead of passing pathbufs around
 
+use crate::config::Config;
 use crate::project::{self, RojoNode, RojoProject};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -17,7 +18,7 @@ pub struct SourceFile {
     pub id: FileId,
     pub path: PathBuf,
     pub kind: FileKind,
-    // only Some for scripts, not models/etc 
+    // only populated for scripts, we dont bother reading models etc
     pub source: Option<String>,
 }
 
@@ -34,7 +35,7 @@ impl FileKind {
     fn from_path(p: &Path) -> Self {
         let name = p.file_name().unwrap_or_default().to_string_lossy();
 
-        // order matters here do not change pls
+        // order matters - check server/client before plain .lua
         if name.ends_with(".server.lua") || name.ends_with(".server.luau") {
             FileKind::Script
         } else if name.ends_with(".client.lua") || name.ends_with(".client.luau") {
@@ -75,17 +76,24 @@ impl SourceTree {
             .sum()
     }
 
-    // path ---> id lookup, this is used during graph build to resolve requires
+    // path -> id lookup, used during graph build to resolve requires
     pub fn find_by_path(&self, path: &Path) -> Option<FileId> {
         self.files.iter().find(|f| f.path == path).map(|f| f.id)
     }
 }
 
-pub fn build(project: &RojoProject, project_path: &Path) -> Result<SourceTree> {
+pub fn build(project: &RojoProject, project_path: &Path, cfg: &Config) -> Result<SourceTree> {
     let root = project::root_dir(project_path);
     let mut paths: Vec<(PathBuf, FileKind)> = Vec::new();
 
     collect_node(&project.tree, &root, &mut paths);
+
+    // filter out ignored paths before we do anything else
+    paths.retain(|(p, _)| {
+        !cfg.analysis.ignore.iter().any(|ignore| {
+            p.starts_with(root.join(ignore))
+        })
+    });
 
     let files = paths
         .into_iter()
@@ -112,7 +120,7 @@ fn collect_node(node: &RojoNode, base: &Path, out: &mut Vec<(PathBuf, FileKind)>
             let kind = FileKind::from_path(&full);
             out.push((full, kind));
         }
-        // if neither the path plobabry doesnt exist
+        // path doesnt exist, skip it
     }
 
     for child in node.children.values() {

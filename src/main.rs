@@ -2,8 +2,9 @@
 //! 
 //! runs static analysis on your rojo project before you sync to studio.
 //! finds dead modules, circular requires, oversized scripts, debug noise.
-//! no runtime overhead
+//! no runtime overhead, no guessing - just reads your files directly
 
+mod config;
 mod project;
 mod tree;
 mod graph;
@@ -46,21 +47,24 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Analyze { project, ci } => {
+            let root = project::root_dir(&project);
+            let cfg = config::load(&root)?;
             let proj = project::load(&project)?;
-            let tree = tree::build(&proj, &project)?;
+            let tree = tree::build(&proj, &project, &cfg)?;
             let graph = graph::build(&tree)?;
-            report::print_analysis(&tree, &graph);
+            report::print_analysis(&tree, &graph, &cfg);
 
             if ci {
-                // let the calling process know something needs fixing
                 std::process::exit(1);
             }
         }
         Command::Build { project, out } => {
+            let root = project::root_dir(&project);
+            let cfg = config::load(&root)?;
             let proj = project::load(&project)?;
-            let tree = tree::build(&proj, &project)?;
+            let tree = tree::build(&proj, &project, &cfg)?;
             let graph = graph::build(&tree)?;
-            report::print_analysis(&tree, &graph);
+            report::print_analysis(&tree, &graph, &cfg);
             println!("\nbuild output to {:?} - not implemented yet", out);
         }
     }
