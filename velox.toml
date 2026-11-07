@@ -1,0 +1,7 @@
+[analysis]
+large_script_threshold_kb = 50
+ignore = []
+
+[build]
+strip_debug = false
+inline_constants = false

@@ -2,16 +2,14 @@
 //! takes the analysis results and prints them in a readable way
 //! nothing fancy 
 
+use crate::config::Config;
 use crate::graph::RequireGraph;
 use crate::tree::SourceTree;
 use colored::Colorize;
 use std::cmp::Reverse;
 
-// NOTE: highly arbitrary number but i think scripts bigger than 50kb 
-// are probably going to be doing too much in one place
-const LARGE_SCRIPT_KB: usize = 50;
-
-pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph) {
+pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph, cfg: &Config) {
+    let large_script_kb = cfg.analysis.large_script_threshold_kb;
     println!("{}", "\n=== velox ===\n".bold());
 
     let script_count = tree.scripts().count();
@@ -24,13 +22,13 @@ pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph) {
     let mut large: Vec<_> = tree
         .scripts()
         .filter(|f| {
-            f.source.as_ref().map(|s| s.len() / 1024 >= LARGE_SCRIPT_KB).unwrap_or(false)
+            f.source.as_ref().map(|s| s.len() / 1024 >= large_script_kb).unwrap_or(false)
         })
         .collect();
     large.sort_by_key(|f| Reverse(f.source.as_ref().map(|s| s.len()).unwrap_or(0)));
 
     if !large.is_empty() {
-        println!("{}", format!("large scripts (>{}kb)", LARGE_SCRIPT_KB).underline().yellow());
+        println!("{}", format!("large scripts (>{}kb)", large_script_kb).underline().yellow());
         for f in &large {
             let kb = f.source.as_ref().map(|s| s.len() / 1024).unwrap_or(0);
             println!("  {:>5} kb  {:?}", kb, f.path.file_name().unwrap_or_default());
