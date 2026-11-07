@@ -38,3 +38,9 @@ coming soon: optimization on build
 ---
 
 ## how this works
+
+velox is a static analysis tool - it reads ur source files directly *without* running them. this means its fast (analyzing a large project takes milliseconds) and doesnt need studio open at all
+
+it understands rojos project structure natively so it knows where your scripts actually live and how they map to the game tree. from there it builds a require graph - every script, every dependency, every connection - and runs analysis passes over it to find problems
+
+the graph uses numeric file ids internally instead of string paths everywhere, so even on large codebases it doesnt slow down a big amount
