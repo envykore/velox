@@ -4,4 +4,5 @@ ignore = []
 
 [build]
 strip_debug = false
+strip_calls = ["print", "warn"]
 inline_constants = false
