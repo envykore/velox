@@ -32,7 +32,7 @@ pub enum FileKind {
 }
 
 impl FileKind {
-    fn from_path(p: &Path) -> Self {
+    pub fn from_path(p: &Path) -> Self {
         let name = p.file_name().unwrap_or_default().to_string_lossy();
 
         // order matters - check server/client before plain .lua
