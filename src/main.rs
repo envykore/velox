@@ -2,6 +2,7 @@
 //! finds dead modules, circular requires, oversized scripts, debug noise
 //! and strips it before you sync to studio
 
+mod build;
 mod config;
 mod graph;
 mod project;
@@ -31,7 +32,7 @@ enum Command {
         #[arg(long)]
         ci: bool,
     },
-    /// strip debug calls and write optimized output
+    /// build optimized output - strips debug calls and copies full project to dist
     Build {
         #[arg(default_value = "default.project.json")]
         project: PathBuf,
@@ -65,32 +66,11 @@ fn main() -> Result<()> {
             let graph = graph::build(&tree)?;
             report::print_analysis(&tree, &graph, &cfg);
 
-            if !cfg.build.strip_debug {
-                println!("\nstrip_debug is off, nothing to do");
-                return Ok(());
-            }
-
-            println!("\n{}", "stripping...".bold());
-            let mut total_calls = 0;
-            let mut total_blocks = 0;
-            let mut written = 0;
-
-            for file in tree.scripts() {
-                let Some(source) = &file.source else { continue };
-                let result = strip::process(source, &cfg.build);
-                total_calls += result.calls_removed;
-                total_blocks += result.dev_blocks_removed;
-
-                let rel = file.path.strip_prefix(&tree.root).unwrap_or(&file.path);
-                let dest = out.join(rel);
-                if let Some(p) = dest.parent() { std::fs::create_dir_all(p)?; }
-                std::fs::write(&dest, result.source.as_bytes())?;
-                written += 1;
-            }
-
+            println!("\n{}", "building...".bold());
+            let result = build::run(&tree, &project, &out, &cfg)?;
             println!(
-                "  {} calls, {} __DEV__ blocks removed across {} files -> {:?}",
-                total_calls, total_blocks, written, out
+                "  {} files written, {} calls removed, {} __DEV__ blocks removed, {} bytes saved -> {:?}",
+                result.files_written, result.calls_removed, result.dev_blocks_removed, result.bytes_saved, out
             );
         }
     }
