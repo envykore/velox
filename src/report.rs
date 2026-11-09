@@ -8,7 +8,7 @@ use crate::tree::SourceTree;
 use colored::Colorize;
 use std::cmp::Reverse;
 
-pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph, cfg: &Config) {
+pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph, cfg: &Config) -> usize {
     let large_script_kb = cfg.analysis.large_script_threshold_kb;
     println!("{}", "\n=== velox ===\n".bold());
 
@@ -73,4 +73,6 @@ pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph, cfg: &Config) {
     } else {
         println!("{}", format!("{} issue(s) across {} scripts", issues, script_count).yellow());
     }
+
+    issues
 }
