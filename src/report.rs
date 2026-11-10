@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use crate::graph::RequireGraph;
+use crate::strip;
 use crate::tree::SourceTree;
 use colored::Colorize;
 use std::cmp::Reverse;
@@ -67,7 +68,31 @@ pub fn print_analysis(tree: &SourceTree, graph: &RequireGraph, cfg: &Config) -> 
         println!();
     }
 
-    let issues = large.len() + dead.len() + cycles.len();
+    // count debug calls across all scripts
+    let mut total_calls = 0;
+    let mut total_dev_blocks = 0;
+    let mut noisy_files = 0;
+    for file in tree.scripts() {
+        if let Some(src) = &file.source {
+            let c = strip::count(src, &cfg.build);
+            if c.calls > 0 || c.dev_blocks > 0 {
+                total_calls += c.calls;
+                total_dev_blocks += c.dev_blocks;
+                noisy_files += 1;
+            }
+        }
+    }
+
+    if total_calls > 0 || total_dev_blocks > 0 {
+        println!("{}", "debug noise".underline().yellow());
+        println!("  {} call(s) across {} file(s)", total_calls, noisy_files);
+        if total_dev_blocks > 0 {
+            println!("  {} __DEV__ block(s)", total_dev_blocks);
+        }
+        println!("  run `velox build` to strip\n");
+    }
+
+    let issues = large.len() + dead.len() + cycles.len() + if total_calls > 0 { 1 } else { 0 };
     if issues == 0 {
         println!("{}", "no issues found".green());
     } else {
