@@ -27,11 +27,14 @@ pub struct BuildConfig {
     #[serde(default = "default_strip_calls")]
     pub strip_calls: Vec<String>,
     #[serde(default)]
-    pub inline_constants: bool,
+    pub inline_constants: bool, // not implemented yet
 }
 
+// 50kb is highly arbitrary ;)
 fn default_large_script_kb() -> usize { 50 }
+
 fn default_strip_calls() -> Vec<String> {
+    // users can add more in velox.toml
     vec!["print".to_string(), "warn".to_string()]
 }
 
@@ -43,19 +46,29 @@ impl Default for Config {
 
 impl Default for AnalysisConfig {
     fn default() -> Self {
-        Self { large_script_threshold_kb: default_large_script_kb(), ignore: Vec::new() }
+        Self {
+            large_script_threshold_kb: default_large_script_kb(),
+            ignore: Vec::new(),
+        }
     }
 }
 
 impl Default for BuildConfig {
     fn default() -> Self {
-        Self { strip_debug: false, strip_calls: default_strip_calls(), inline_constants: false }
+        Self {
+            strip_debug: false,
+            strip_calls: default_strip_calls(),
+            inline_constants: false,
+        }
     }
 }
 
 pub fn load(project_root: &Path) -> Result<Config> {
     let path = project_root.join("velox.toml");
+
+    // just use defaults
     if !path.exists() { return Ok(Config::default()); }
+
     let raw = std::fs::read_to_string(&path)?;
     Ok(toml::from_str(&raw)?)
 }
