@@ -27,7 +27,7 @@ pub struct BuildConfig {
     #[serde(default = "default_strip_calls")]
     pub strip_calls: Vec<String>,
     #[serde(default)]
-    pub inline_constants: bool, // not implemented yet
+    pub inline_constants: bool, // TODO: implement
 }
 
 // 50kb is highly arbitrary ;)
