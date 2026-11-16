@@ -26,14 +26,12 @@ after that it finds problems
 - dead modules (modulescripts that nothing requires (safe to delete))
 - module a requires module b, module b requires module a
 - large scripts (good sign that something needs to be split up into two or three modules)
-- useless debug noise
-- `__DEV__` guards 
+- debug noise - counts print/warn calls and __DEV__ blocks 
 
-coming soon: optimization on build
-- strips debug calls
-- inlines constant modules
-- removes deadfiles
-- reports total size reduction
+on build (`velox build`)
+- strips debug calls and `__DEV__` blocks from scripts
+- copies the full project to `dist/` - everything
+- reports calls removed, blocks removed, bytes saved
 
 ---
 
@@ -44,3 +42,20 @@ velox is a static analysis tool - it reads ur source files directly *without* ru
 it understands rojos project structure natively so it knows where your scripts actually live and how they map to the game tree. from there it builds a require graph - every script, every dependency, every connection - and runs analysis passes over it to find problems
 
 the graph uses numeric file ids internally instead of string paths everywhere, so even on large codebases it doesnt slow down a big amount
+
+## install
+
+grab a binary from [releases](../../releases) or build from source:
+
+```sh
+cargo install --git https://github.com/envykore/velox
+```
+
+## usage
+
+```sh
+velox analyze               # find issues
+velox analyze --ci          # exits 1 if issues found
+velox build                 # strip debug calls and copy to dist/
+velox build --out ./output  # custom output dir
+```
