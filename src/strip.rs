@@ -10,6 +10,101 @@ pub struct StripResult {
     pub dev_blocks_removed: usize,
 }
 
+// count debug calls without modifying anything, used by analyze
+pub struct CountResult {
+    pub calls: usize,
+    pub dev_blocks: usize,
+}
+
+pub fn count(source: &str, cfg: &crate::config::BuildConfig) -> CountResult {
+    let bytes = source.as_bytes();
+    let len = bytes.len();
+    let mut calls = 0;
+    let mut dev_blocks = 0;
+    let mut state = State::Normal;
+    let mut i = 0;
+
+    while i < len {
+        match state {
+            State::Normal => {
+                if i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+                    let eq = count_eq(bytes, i + 2);
+                    if i + 2 + eq < len && bytes[i + 2 + eq] == b'[' {
+                        state = State::BlockComment(eq as u32);
+                        i += 3 + eq;
+                    } else {
+                        state = State::LineComment;
+                        i += 2;
+                    }
+                    continue;
+                }
+                if bytes[i] == b'[' {
+                    let eq = count_eq(bytes, i + 1);
+                    if i + 1 + eq < len && bytes[i + 1 + eq] == b'[' {
+                        state = State::LongString(eq as u32);
+                        i += 2 + eq;
+                        continue;
+                    }
+                }
+                if bytes[i] == b'"' || bytes[i] == b'\'' {
+                    state = State::ShortString(bytes[i]);
+                    i += 1;
+                    continue;
+                }
+                if let Some(end) = try_match_dev_block(bytes, i) {
+                    dev_blocks += 1;
+                    i = end;
+                    continue;
+                }
+                for call in &cfg.strip_calls {
+                    let cb = call.as_bytes();
+                    if bytes[i..].starts_with(cb) {
+                        let after = i + cb.len();
+                        if after < len && bytes[after] == b'(' && !ident_before(bytes, i) {
+                            calls += 1;
+                            break;
+                        }
+                    }
+                }
+                i += 1;
+            }
+            State::LineComment => {
+                if bytes[i] == b'\n' { state = State::Normal; }
+                i += 1;
+            }
+            State::BlockComment(eq) => {
+                if bytes[i] == b']' {
+                    let found = count_eq(bytes, i + 1);
+                    if found == eq as usize && i + 1 + found < len && bytes[i + 1 + found] == b']' {
+                        state = State::Normal;
+                        i += 2 + found;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+            State::ShortString(q) => {
+                if bytes[i] == b'\\' { i += 2; continue; }
+                if bytes[i] == q || bytes[i] == b'\n' { state = State::Normal; }
+                i += 1;
+            }
+            State::LongString(eq) => {
+                if bytes[i] == b']' {
+                    let found = count_eq(bytes, i + 1);
+                    if found == eq as usize && i + 1 + found < len && bytes[i + 1 + found] == b']' {
+                        state = State::Normal;
+                        i += 2 + found;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+
+    CountResult { calls, dev_blocks }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum State {
     Normal,
