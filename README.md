@@ -2,7 +2,9 @@
   <img src="assets/banner.png" alt="velox" width="100%">
 </p>
 
-![ci](https://github.com/envykore/velox/actions/workflows/ci.yml/badge.svg)
+[![ci](https://img.shields.io/github/actions/workflow/status/envykore/velox/ci.yml)](https://github.com/envykore/velox/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/envykore/velox)](https://github.com/envykore/velox/releases)
+[![license](https://img.shields.io/github/license/envykore/velox)](https://github.com/envykore/velox/blob/main/LICENSE)
 
 
 **fast build time luau optimizer for roblox projects written in rust**
