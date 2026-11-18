@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="velox" width="100%">
+  <img src="assets/banner.jfif" alt="velox" width="100%">
 </p>
 
 [![ci](https://img.shields.io/github/actions/workflow/status/envykore/velox/ci.yml)](https://github.com/envykore/velox/actions/workflows/ci.yml)
